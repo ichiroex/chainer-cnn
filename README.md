@@ -20,3 +20,13 @@ Please download `GoogleNews-vectors-negative300.bin.gz` from [this site](https:/
                         learning minibatch size
   --nunits NUNITS       number of units
 ```
+
+# Data format for input data
+  - [0 or 1] [Sequence of words]  
+    - 1 and 0 are positive and negative, respectively.  
+
+## Examples
+```
+1 That was so beautiful that it can't be put into words . (POSITIVE SETENCE)
+0 I do not want to go to school because I do like to study math . (NEGATIVE SENTENCE)
+```
