@@ -13,6 +13,7 @@ from gensim import corpora, matutils
 from gensim.models import word2vec
 
 import util
+from SimpleCNN import SimpleCNN
 
 """
 CNNによるテキスト分類 (posi-nega)
@@ -26,6 +27,7 @@ parser.add_argument('--gpu  '    , dest='gpu'        , type=int, default=0,     
 parser.add_argument('--data '    , dest='data'       , type=str, default='input.dat',  help='an input data file')
 parser.add_argument('--epoch'    , dest='epoch'      , type=int, default=100,          help='number of epochs to learn')
 parser.add_argument('--batchsize', dest='batchsize'  , type=int, default=40,           help='learning minibatch size')
+parser.add_argument('--nunits'   , dest='nunits'     , type=int, default=200,          help='number of units')
 
 args = parser.parse_args()
 batchsize   = args.batchsize    # minibatch size
@@ -33,7 +35,6 @@ n_epoch     = args.epoch        # エポック数(パラメータ更新回数)
 
 # Prepare dataset
 dataset, height, width = util.load_data(args.data)
-
 print 'height:', height
 print 'width:', width
 
@@ -50,17 +51,14 @@ input_channel = 1
 x_train = x_train.reshape(len(x_train), input_channel, height, width) 
 x_test  = x_test.reshape(len(x_test), input_channel, height, width)
 
-#"""
 # 隠れ層のユニット数
-n_units = 200
+n_units = args.nunits
 n_label = 2
 filter_height = 3
 output_channel = 50
 
 #モデルの定義
-model = chainer.Chain(conv1=L.Convolution2D(input_channel, output_channel, (filter_height, width)), 
-                      l1=L.Linear(950, n_units),
-                      l2=L.Linear(n_units,  n_label))
+model = L.Classifier( SimpleCNN(input_channel, output_channel, filter_height, width, 950, n_units, n_label))
 
 #GPUを使うかどうか
 if args.gpu > 0:
@@ -69,27 +67,19 @@ if args.gpu > 0:
     model.to_gpu()
     xp = np if args.gpu <= 0 else cuda.cupy #args.gpu <= 0: use cpu, otherwise: use gpu
 
-batchsize = 40
-n_epoch = 100
-
-def forward(x, t, train=True):
-
-    h1 = F.max_pooling_2d(F.relu(model.conv1(x)), 3)
-    h2 = F.dropout(F.relu(model.l1(h1)), train=train)
-    y = model.l2(h2)
-
-    return F.softmax_cross_entropy(y, t), F.accuracy(y, t)
+batchsize = args.batchsize
+n_epoch = args.epoch
 
 # Setup optimizer
-optimizer = optimizers.Adam()
+optimizer = optimizers.AdaGrad()
 optimizer.setup(model)
 
 # Learning loop
 for epoch in six.moves.range(1, n_epoch + 1):
 
-    print 'epoch', epoch
+    print 'epoch', epoch, '/', n_epoch
     
-    # training
+    # training)
     perm = np.random.permutation(N) #ランダムな整数列リストを取得
     sum_train_loss     = 0.0
     sum_train_accuracy = 0.0
@@ -99,15 +89,12 @@ for epoch in six.moves.range(1, n_epoch + 1):
         x = chainer.Variable(xp.asarray(x_train[perm[i:i + batchsize]])) #source
         t = chainer.Variable(xp.asarray(y_train[perm[i:i + batchsize]])) #target
         
-        model.zerograds()            # 勾配をゼロ初期化
-        loss, acc = forward(x, t)    # 順伝搬
-        sum_train_loss      += float(cuda.to_cpu(loss.data)) * len(t)   # 平均誤差計算用
-        sum_train_accuracy  += float(cuda.to_cpu(acc.data )) * len(t)   # 平均正解率計算用
-        loss.backward()              # 誤差逆伝播
-        optimizer.update()           # 最適化
+        optimizer.update(model, x, t)
+
+        sum_train_loss      += float(model.loss.data) * len(t.data)   # 平均誤差計算用
+        sum_train_accuracy  += float(model.accuracy.data ) * len(t.data)   # 平均正解率計算用
 
     print('train mean loss={}, accuracy={}'.format(sum_train_loss / N, sum_train_accuracy / N)) #平均誤差
-
 
     # evaluation
     sum_test_loss     = 0.0
@@ -118,18 +105,23 @@ for epoch in six.moves.range(1, n_epoch + 1):
         x = chainer.Variable(xp.asarray(x_test[i:i + batchsize]))
         t = chainer.Variable(xp.asarray(y_test[i:i + batchsize]))
 
-        loss, acc = forward(x, t, train=False)
+        loss = model(x, t)
 
-        sum_test_loss     += float(cuda.to_cpu(loss.data)) * len(t)
-        sum_test_accuracy += float(cuda.to_cpu(acc.data))  * len(t)
+        sum_test_loss     += float(loss.data) * len(t.data)
+        sum_test_accuracy += float(model.accuracy.data)  * len(t.data)
 
     print(' test mean loss={}, accuracy={}'.format(
         sum_test_loss / N_test, sum_test_accuracy / N_test)) #平均誤差
 
+    if epoch > 10:
+        optimizer.lr *= 0.97
+        print 'learning rate: ', optimizer.lr
+
+    sys.stdout.flush()
 
 #modelとoptimizerを保存
 print 'save the model'
-serializers.save_npz('pn_classifier_cnn.model', model)
+serializers.save_npz('./model/pn_classifier_cnn.model', model)
 print 'save the optimizer'
-serializers.save_npz('pn_classifier_cnn.state', optimizer)
+serializers.save_npz('./model/pn_classifier_cnn.state', optimizer)
 
