@@ -12,9 +12,6 @@ def padding(document_list, max_len):
 
 def load_data(fname):
 
-    #ストップワードリストを作成
-    stopword_list = open('stopword.txt', 'r').read().split('\r\n')
-
     model =  word2vec.Word2Vec.load_word2vec_format('GoogleNews-vectors-negative300.bin', binary=True)
 
     target = [] #ラベル
@@ -33,8 +30,6 @@ def load_data(fname):
     for doc in document_list:
         rev_doc = []
         for word in doc:
-            #ストップワードは無視
-            #if word not in stopword_list:
             try:
                 word_vec = np.array(model[word]) #未知語の場合, KeyErrorが起きる
                 rev_doc.append(word)
